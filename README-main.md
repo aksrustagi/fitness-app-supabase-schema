@@ -1,1 +1,0 @@
-# Fitness App Supabase Schema
