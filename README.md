@@ -104,12 +104,35 @@ The schema uses the following PostgreSQL extensions:
 
 ## New Tables Added
 
+### Core Health & Fitness Tables
 - `meditation_log`: Track user meditation sessions
 - `challenge_participants`: Track users participating in challenges
 - `protocol_participants`: Track users following protocols
 - `products`: Catalog of available products
 - `user_stats`: Track user health metrics over time
 - `user_preferences`: Store user application preferences
+
+### AI Agent & Automation Tables
+- `ai_agents`: Define AI coaches and agents with capabilities and base prompts
+- `user_ai_agents`: Link users with their personalized AI agents
+- `agent_goals`: Track goals assigned to AI agents for users
+- `agent_commands`: Log commands and API calls made by AI agents
+- `agent_messages`: Store messages sent by AI agents to users
+- `agent_schedules`: Schedule recurring agent activities
+- `agent_feedback`: Collect user feedback on agent interactions
+
+### Notification & Communication Tables
+- `notifications`: Track push notifications sent to users
+- `notification_devices`: Store user device tokens for push notifications
+- `emails`: Log emails sent to users
+- `email_templates`: Store reusable email templates
+
+### Integration & API Tables
+- `api_integrations`: Configure external API integrations
+- `user_api_integrations`: Link users with their API integration credentials
+- `api_logs`: Log all API calls for auditing and debugging
+- `webhooks`: Configure webhook endpoints for external services
+- `webhook_logs`: Log webhook calls for auditing and debugging
 
 ## Contributing
 

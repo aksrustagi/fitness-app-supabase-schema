@@ -573,6 +573,7 @@ CREATE TABLE user_preferences (
     measurement_system TEXT DEFAULT 'metric', -- metric, imperial
     language TEXT DEFAULT 'en', -- en, es, fr, etc.
     privacy_settings JSONB,
+    is_admin BOOLEAN NOT NULL DEFAULT FALSE, -- Admin flag for special permissions
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT unique_user_preferences UNIQUE (user_id)
@@ -726,6 +727,518 @@ LEFT JOIN (
     FROM workout_log
     GROUP BY user_id, date
 ) wo ON u.id = wo.user_id AND d.date = wo.date;
+
+-- 35. ai_agents (New table for AI agents/coaches)
+CREATE TABLE ai_agents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    description TEXT,
+    agent_type TEXT NOT NULL, -- coach, nutritionist, trainer, therapist, etc.
+    capabilities TEXT[], -- array of capabilities like 'messaging', 'goal_tracking', 'workout_planning', etc.
+    base_prompt TEXT NOT NULL, -- The base system prompt for the agent
+    model TEXT NOT NULL, -- GPT-4, Claude 3, etc.
+    avatar_url TEXT,
+    voice_id TEXT, -- For voice interactions
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 36. user_ai_agents (New table to link users with their AI agents)
+CREATE TABLE user_ai_agents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    agent_id UUID NOT NULL REFERENCES ai_agents(id),
+    custom_name TEXT, -- User can rename their agent
+    custom_prompt TEXT, -- Additional personalized prompt
+    is_primary BOOLEAN NOT NULL DEFAULT FALSE, -- Is this the user's primary agent
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    last_interaction_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_user_agent UNIQUE (user_id, agent_id)
+);
+
+-- 37. agent_goals (New table to track goals assigned to AI agents)
+CREATE TABLE agent_goals (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    agent_id UUID NOT NULL REFERENCES ai_agents(id),
+    goal_id UUID REFERENCES goals(id) ON DELETE CASCADE,
+    description TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 1, -- 1 (highest) to 5 (lowest)
+    status TEXT NOT NULL DEFAULT 'active', -- active, completed, abandoned
+    start_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    target_date DATE,
+    completion_date DATE,
+    progress NUMERIC DEFAULT 0, -- percentage complete
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT check_priority_range CHECK (priority >= 1 AND priority <= 5),
+    CONSTRAINT check_progress_range CHECK (progress >= 0 AND progress <= 100)
+);
+
+-- 38. agent_commands (New table to track commands issued by AI agents)
+CREATE TABLE agent_commands (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    agent_id UUID NOT NULL REFERENCES ai_agents(id),
+    user_id UUID NOT NULL REFERENCES auth.users(id),
+    command_type TEXT NOT NULL, -- message, notification, api_call, workout_plan, etc.
+    command_data JSONB NOT NULL, -- Command details
+    status TEXT NOT NULL DEFAULT 'pending', -- pending, executed, failed
+    result JSONB, -- Result of the command
+    error_message TEXT,
+    executed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 39. agent_messages (New table for messages sent by AI agents)
+CREATE TABLE agent_messages (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    agent_id UUID NOT NULL REFERENCES ai_agents(id),
+    user_id UUID NOT NULL REFERENCES auth.users(id),
+    group_id UUID REFERENCES message_groups(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    message_type TEXT NOT NULL DEFAULT 'text', -- text, suggestion, reminder, etc.
+    context JSONB, -- Context that triggered this message
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 40. agent_schedules (New table for scheduled agent activities)
+CREATE TABLE agent_schedules (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    agent_id UUID NOT NULL REFERENCES ai_agents(id),
+    user_id UUID NOT NULL REFERENCES auth.users(id),
+    schedule_type TEXT NOT NULL, -- daily_check_in, workout_reminder, meal_planning, etc.
+    frequency TEXT NOT NULL, -- daily, weekly, monthly, custom
+    custom_schedule JSONB, -- For custom schedules
+    next_execution TIMESTAMPTZ NOT NULL,
+    last_execution TIMESTAMPTZ,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 41. agent_feedback (New table for user feedback on agent interactions)
+CREATE TABLE agent_feedback (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    agent_id UUID NOT NULL REFERENCES ai_agents(id),
+    user_id UUID NOT NULL REFERENCES auth.users(id),
+    interaction_id UUID, -- Could reference a message, command, etc.
+    interaction_type TEXT NOT NULL, -- message, command, suggestion, etc.
+    rating INTEGER NOT NULL, -- 1-5 star rating
+    feedback TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT check_rating_range CHECK (rating >= 1 AND rating <= 5)
+);
+
+-- 42. notifications (New table for push notifications)
+CREATE TABLE notifications (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    data JSONB, -- Additional data for the notification
+    type TEXT NOT NULL, -- workout, meal, goal, message, etc.
+    priority TEXT NOT NULL DEFAULT 'normal', -- high, normal, low
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    read_at TIMESTAMPTZ,
+    action_taken BOOLEAN NOT NULL DEFAULT FALSE,
+    action_taken_at TIMESTAMPTZ,
+    created_by TEXT NOT NULL, -- system, agent, user
+    agent_id UUID REFERENCES ai_agents(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 43. notification_devices (New table for user devices to receive notifications)
+CREATE TABLE notification_devices (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    device_token TEXT NOT NULL,
+    device_type TEXT NOT NULL, -- ios, android, web
+    device_name TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    last_used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_device_token UNIQUE (device_token)
+);
+
+-- 44. emails (New table for email communications)
+CREATE TABLE emails (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    subject TEXT NOT NULL,
+    body TEXT NOT NULL,
+    html_body TEXT,
+    recipient_email TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending', -- pending, sent, delivered, opened, clicked, failed
+    type TEXT NOT NULL, -- welcome, password_reset, notification, newsletter, etc.
+    sent_at TIMESTAMPTZ,
+    opened_at TIMESTAMPTZ,
+    clicked_at TIMESTAMPTZ,
+    template_id TEXT, -- Reference to email template if used
+    template_data JSONB, -- Data used to populate the template
+    created_by TEXT NOT NULL, -- system, agent, user
+    agent_id UUID REFERENCES ai_agents(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 45. email_templates (New table for email templates)
+CREATE TABLE email_templates (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    body TEXT NOT NULL,
+    html_body TEXT,
+    type TEXT NOT NULL, -- welcome, password_reset, notification, newsletter, etc.
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_template_name UNIQUE (name)
+);
+
+-- 46. api_integrations (New table for external API integrations)
+CREATE TABLE api_integrations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    provider TEXT NOT NULL, -- google, apple, fitbit, strava, etc.
+    description TEXT,
+    api_key_encrypted TEXT,
+    api_secret_encrypted TEXT,
+    config JSONB,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_integration_name UNIQUE (name)
+);
+
+-- 47. user_api_integrations (New table to link users with API integrations)
+CREATE TABLE user_api_integrations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    integration_id UUID NOT NULL REFERENCES api_integrations(id),
+    access_token_encrypted TEXT,
+    refresh_token_encrypted TEXT,
+    token_expires_at TIMESTAMPTZ,
+    scopes TEXT[],
+    user_identifier TEXT, -- User ID in the external system
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    last_synced_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_user_integration UNIQUE (user_id, integration_id)
+);
+
+-- 48. api_logs (New table to log API calls)
+CREATE TABLE api_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    integration_id UUID REFERENCES api_integrations(id),
+    user_id UUID REFERENCES auth.users(id),
+    agent_id UUID REFERENCES ai_agents(id),
+    endpoint TEXT NOT NULL,
+    method TEXT NOT NULL, -- GET, POST, PUT, DELETE, etc.
+    request_headers JSONB,
+    request_body JSONB,
+    response_status INTEGER,
+    response_headers JSONB,
+    response_body JSONB,
+    error_message TEXT,
+    duration_ms INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 49. webhooks (New table for webhook configurations)
+CREATE TABLE webhooks (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    events TEXT[] NOT NULL, -- Array of events to trigger this webhook
+    secret_key_encrypted TEXT,
+    headers JSONB,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_webhook_name UNIQUE (name)
+);
+
+-- 50. webhook_logs (New table to log webhook calls)
+CREATE TABLE webhook_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    webhook_id UUID NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+    event TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    response_status INTEGER,
+    response_body TEXT,
+    error_message TEXT,
+    duration_ms INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Create additional indexes for the new tables
+CREATE INDEX idx_ai_agents_agent_type ON ai_agents(agent_type);
+CREATE INDEX idx_user_ai_agents_user_id ON user_ai_agents(user_id);
+CREATE INDEX idx_user_ai_agents_agent_id ON user_ai_agents(agent_id);
+CREATE INDEX idx_agent_goals_user_id ON agent_goals(user_id);
+CREATE INDEX idx_agent_goals_agent_id ON agent_goals(agent_id);
+CREATE INDEX idx_agent_goals_goal_id ON agent_goals(goal_id);
+CREATE INDEX idx_agent_commands_user_id ON agent_commands(user_id);
+CREATE INDEX idx_agent_commands_agent_id ON agent_commands(agent_id);
+CREATE INDEX idx_agent_commands_command_type ON agent_commands(command_type);
+CREATE INDEX idx_agent_messages_user_id ON agent_messages(user_id);
+CREATE INDEX idx_agent_messages_agent_id ON agent_messages(agent_id);
+CREATE INDEX idx_agent_messages_group_id ON agent_messages(group_id);
+CREATE INDEX idx_agent_schedules_user_id ON agent_schedules(user_id);
+CREATE INDEX idx_agent_schedules_agent_id ON agent_schedules(agent_id);
+CREATE INDEX idx_agent_schedules_next_execution ON agent_schedules(next_execution);
+CREATE INDEX idx_agent_feedback_user_id ON agent_feedback(user_id);
+CREATE INDEX idx_agent_feedback_agent_id ON agent_feedback(agent_id);
+CREATE INDEX idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX idx_notifications_type ON notifications(type);
+CREATE INDEX idx_notifications_sent_at ON notifications(sent_at);
+CREATE INDEX idx_notification_devices_user_id ON notification_devices(user_id);
+CREATE INDEX idx_emails_user_id ON emails(user_id);
+CREATE INDEX idx_emails_status ON emails(status);
+CREATE INDEX idx_emails_type ON emails(type);
+CREATE INDEX idx_emails_sent_at ON emails(sent_at);
+CREATE INDEX idx_email_templates_type ON email_templates(type);
+CREATE INDEX idx_api_integrations_provider ON api_integrations(provider);
+CREATE INDEX idx_user_api_integrations_user_id ON user_api_integrations(user_id);
+CREATE INDEX idx_user_api_integrations_integration_id ON user_api_integrations(integration_id);
+CREATE INDEX idx_api_logs_user_id ON api_logs(user_id);
+CREATE INDEX idx_api_logs_integration_id ON api_logs(integration_id);
+CREATE INDEX idx_api_logs_agent_id ON api_logs(agent_id);
+CREATE INDEX idx_api_logs_created_at ON api_logs(created_at);
+CREATE INDEX idx_webhooks_events ON webhooks USING GIN(events);
+CREATE INDEX idx_webhook_logs_webhook_id ON webhook_logs(webhook_id);
+CREATE INDEX idx_webhook_logs_created_at ON webhook_logs(created_at);
+
+-- Add RLS policies for the new tables
+ALTER TABLE ai_agents ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Admins can manage AI agents" ON ai_agents USING (auth.uid() IN (SELECT user_id FROM user_preferences WHERE is_admin = TRUE));
+
+ALTER TABLE user_ai_agents ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view their own AI agents" ON user_ai_agents FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage their own AI agents" ON user_ai_agents FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update their own AI agents" ON user_ai_agents FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own AI agents" ON user_ai_agents FOR DELETE USING (auth.uid() = user_id);
+
+ALTER TABLE agent_goals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view their own agent goals" ON agent_goals FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage their own agent goals" ON agent_goals FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update their own agent goals" ON agent_goals FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own agent goals" ON agent_goals FOR DELETE USING (auth.uid() = user_id);
+
+ALTER TABLE agent_commands ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view their own agent commands" ON agent_commands FOR SELECT USING (auth.uid() = user_id);
+
+ALTER TABLE agent_messages ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view their own agent messages" ON agent_messages FOR SELECT USING (auth.uid() = user_id);
+
+ALTER TABLE agent_schedules ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view their own agent schedules" ON agent_schedules FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage their own agent schedules" ON agent_schedules FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update their own agent schedules" ON agent_schedules FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own agent schedules" ON agent_schedules FOR DELETE USING (auth.uid() = user_id);
+
+ALTER TABLE agent_feedback ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view their own agent feedback" ON agent_feedback FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage their own agent feedback" ON agent_feedback FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update their own agent feedback" ON agent_feedback FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own agent feedback" ON agent_feedback FOR DELETE USING (auth.uid() = user_id);
+
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view their own notifications" ON notifications FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can update their own notifications" ON notifications FOR UPDATE USING (auth.uid() = user_id);
+
+ALTER TABLE notification_devices ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view their own notification devices" ON notification_devices FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage their own notification devices" ON notification_devices FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update their own notification devices" ON notification_devices FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own notification devices" ON notification_devices FOR DELETE USING (auth.uid() = user_id);
+
+ALTER TABLE emails ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view their own emails" ON emails FOR SELECT USING (auth.uid() = user_id);
+
+ALTER TABLE user_api_integrations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view their own API integrations" ON user_api_integrations FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage their own API integrations" ON user_api_integrations FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update their own API integrations" ON user_api_integrations FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own API integrations" ON user_api_integrations FOR DELETE USING (auth.uid() = user_id);
+
+-- Create functions for AI agent operations
+CREATE OR REPLACE FUNCTION get_agent_context(p_agent_id UUID, p_user_id UUID)
+RETURNS JSONB AS $$
+DECLARE
+    result JSONB;
+BEGIN
+    -- Get user profile data
+    WITH user_data AS (
+        SELECT 
+            u.id,
+            u.email,
+            up.theme,
+            up.language,
+            up.measurement_system,
+            us.weight,
+            us.height,
+            us.body_fat_percentage,
+            us.bmi
+        FROM 
+            auth.users u
+        LEFT JOIN 
+            user_preferences up ON u.id = up.user_id
+        LEFT JOIN 
+            user_stats us ON u.id = us.user_id
+        WHERE 
+            u.id = p_user_id
+        ORDER BY 
+            us.date DESC
+        LIMIT 1
+    ),
+    -- Get user goals
+    goals_data AS (
+        SELECT 
+            jsonb_agg(
+                jsonb_build_object(
+                    'id', g.id,
+                    'goal_type', g.goal_type,
+                    'description', g.notes,
+                    'target_date', g.target_date,
+                    'progress', g.progress,
+                    'status', g.status
+                )
+            ) AS goals
+        FROM 
+            goals g
+        WHERE 
+            g.user_id = p_user_id AND g.status = 'active'
+    ),
+    -- Get recent workouts
+    workouts_data AS (
+        SELECT 
+            jsonb_agg(
+                jsonb_build_object(
+                    'id', w.id,
+                    'workout_name', w.workout_name,
+                    'workout_type', w.workout_type,
+                    'date', w.date,
+                    'duration', w.length,
+                    'calories_burned', w.calories_burned
+                )
+            ) AS recent_workouts
+        FROM 
+            workout_log w
+        WHERE 
+            w.user_id = p_user_id
+        ORDER BY 
+            w.date DESC
+        LIMIT 5
+    ),
+    -- Get recent meals
+    meals_data AS (
+        SELECT 
+            jsonb_agg(
+                jsonb_build_object(
+                    'id', c.id,
+                    'food_name', c.food_name,
+                    'calories', c.calories,
+                    'meal_type', c.meal_type,
+                    'date', c.date
+                )
+            ) AS recent_meals
+        FROM 
+            calories_log c
+        WHERE 
+            c.user_id = p_user_id
+        ORDER BY 
+            c.date DESC, c.time DESC
+        LIMIT 10
+    ),
+    -- Get active fasts
+    fasts_data AS (
+        SELECT 
+            jsonb_agg(
+                jsonb_build_object(
+                    'id', f.id,
+                    'start_time', f.start_time,
+                    'duration', f.duration,
+                    'fast_type', f.fast_type,
+                    'status', f.status
+                )
+            ) AS active_fasts
+        FROM 
+            fasts_log f
+        WHERE 
+            f.user_id = p_user_id AND f.status = 'active'
+    ),
+    -- Get agent configuration
+    agent_data AS (
+        SELECT 
+            a.id,
+            a.name,
+            a.agent_type,
+            a.capabilities,
+            a.base_prompt,
+            uaa.custom_name,
+            uaa.custom_prompt
+        FROM 
+            ai_agents a
+        JOIN 
+            user_ai_agents uaa ON a.id = uaa.agent_id
+        WHERE 
+            a.id = p_agent_id AND uaa.user_id = p_user_id
+    )
+    -- Combine all data into a single context object
+    SELECT 
+        jsonb_build_object(
+            'user', jsonb_build_object(
+                'id', ud.id,
+                'email', ud.email,
+                'preferences', jsonb_build_object(
+                    'theme', ud.theme,
+                    'language', ud.language,
+                    'measurement_system', ud.measurement_system
+                ),
+                'stats', jsonb_build_object(
+                    'weight', ud.weight,
+                    'height', ud.height,
+                    'body_fat_percentage', ud.body_fat_percentage,
+                    'bmi', ud.bmi
+                )
+            ),
+            'goals', COALESCE(gd.goals, '[]'::jsonb),
+            'recent_workouts', COALESCE(wd.recent_workouts, '[]'::jsonb),
+            'recent_meals', COALESCE(md.recent_meals, '[]'::jsonb),
+            'active_fasts', COALESCE(fd.active_fasts, '[]'::jsonb),
+            'agent', jsonb_build_object(
+                'id', ad.id,
+                'name', COALESCE(ad.custom_name, ad.name),
+                'agent_type', ad.agent_type,
+                'capabilities', ad.capabilities,
+                'base_prompt', ad.base_prompt,
+                'custom_prompt', ad.custom_prompt
+            )
+        ) INTO result
+    FROM 
+        user_data ud,
+        goals_data gd,
+        workouts_data wd,
+        meals_data md,
+        fasts_data fd,
+        agent_data ad;
+        
+    RETURN result;
+END;
+$$ LANGUAGE plpgsql;
 
 -- Create functions for common calculations
 CREATE OR REPLACE FUNCTION calculate_bmi(weight_kg NUMERIC, height_cm NUMERIC)
