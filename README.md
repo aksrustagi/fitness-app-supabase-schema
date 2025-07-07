@@ -134,6 +134,39 @@ The schema uses the following PostgreSQL extensions:
 - `webhooks`: Configure webhook endpoints for external services
 - `webhook_logs`: Log webhook calls for auditing and debugging
 
+## Expanded Table Fields
+
+The schema includes expanded table fields for more comprehensive data collection and advanced features:
+
+### User-Related Expansions
+- **User Stats**: Added fields for metabolic rate, activity level, medical conditions, sleep quality, and more
+- **Goals**: Enhanced with goal categories, sub-goals, motivation tracking, and AI-assessed difficulty ratings
+
+### Nutrition Expansions
+- **Calories Log**: Expanded with detailed nutritional information, food sourcing, and emotional context
+- **Food Searches**: Added AI confidence scores, alternative identifications, and user feedback
+- **Fasts Log**: Enhanced with mood tracking, ketone/glucose levels, and streak tracking
+
+### Workout Expansions
+- **Workout Log**: Added perceived exertion, heart rate data, recovery metrics, and environmental context
+- **Exercises**: Enhanced with variations, progression paths, safety considerations, and form guidance
+- **Exercise Log**: Added form quality tracking, personal records, and advanced training techniques
+
+### AI Agent Expansions
+- **AI Agents**: Enhanced with personality traits, communication styles, and ethical guidelines
+- **Agent Commands**: Added execution metrics, command chains, and security controls
+- **Agent Messages**: Enhanced with sentiment analysis, engagement scoring, and message optimization
+
+### Notification Expansions
+- **Notifications**: Added delivery tracking, engagement metrics, and presentation customization
+- **Emails**: Enhanced with delivery analytics, client tracking, and A/B testing support
+
+### Integration Expansions
+- **API Integrations**: Added detailed API metadata, compliance information, and fallback behaviors
+- **User API Integrations**: Enhanced with connection status tracking, consent management, and sync preferences
+
+For detailed field listings, see `expanded-table-fields.md` and `expanded-table-fields.sql`.
+
 ## Contributing
 
 Feel free to suggest improvements or additional tables by creating a pull request.
