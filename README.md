@@ -112,6 +112,24 @@ The schema uses the following PostgreSQL extensions:
 - `user_stats`: Track user health metrics over time
 - `user_preferences`: Store user application preferences
 
+### Health Vitals & Tracking Tables
+- `sleep_log`: Comprehensive sleep tracking with quality metrics and environmental factors
+- `vital_signs`: Track heart rate, blood pressure, respiratory rate, and other vital signs
+- `hormone_levels`: Monitor testosterone, cortisol, and other hormone levels
+- `nutrient_levels`: Track vitamins, minerals, and other nutrient levels
+- `body_measurements`: Detailed body measurements beyond basic weight and height
+- `activity_metrics`: Daily activity tracking with recovery and readiness scores
+- `health_assessments`: Health scores, fitness age, and life expectancy predictions
+- `mood_tracking`: Track mood, energy, stress, confidence, and attractiveness
+- `health_goals_progress`: Track progress toward health goals with confidence scores
+- `health_insights`: AI-generated insights from health data
+- `health_chat_sessions`: Track health assessment chat sessions
+- `external_health_data`: Store data imported from Apple Health and other platforms
+- `health_reports`: Generated health reports and analyses
+- `attractiveness_metrics`: Track factors affecting attractiveness and confidence
+- `health_correlations`: Track correlations between different health metrics
+- `apple_health_sync`: Track Apple Health data synchronization status
+
 ### AI Agent & Automation Tables
 - `ai_agents`: Define AI coaches and agents with capabilities and base prompts
 - `user_ai_agents`: Link users with their personalized AI agents
